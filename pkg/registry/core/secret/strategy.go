@@ -29,6 +29,7 @@ import (
 	"k8s.io/apiserver/pkg/registry/rest"
 	pkgstorage "k8s.io/apiserver/pkg/storage"
 	"k8s.io/apiserver/pkg/storage/names"
+
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/core/validation"
@@ -67,6 +68,14 @@ func (strategy) AllowCreateOnUpdate() bool {
 }
 
 func (strategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Object) {
+
+	newSecret := obj.(*api.Secret)
+	oldSecret := old.(*api.Secret)
+
+	// this is weird, but consistent with what the validatedUpdate function used to do.
+	if len(newSecret.Type) == 0 {
+		newSecret.Type = oldSecret.Type
+	}
 }
 
 func (strategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
