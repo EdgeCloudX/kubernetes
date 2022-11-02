@@ -30,7 +30,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
-
+        "time"
 	"golang.org/x/net/http2"
 	"k8s.io/klog"
 )
@@ -121,7 +121,7 @@ func SetTransportDefaults(t *http.Transport) *http.Transport {
 	if s := os.Getenv("DISABLE_HTTP2"); len(s) > 0 {
 		klog.Infof("HTTP2 has been explicitly disabled")
 	} else if allowsHTTP2(t) {
-		if err := http2.configureHTTP2Transport(t); err != nil {
+		if err := configureHTTP2Transport(t); err != nil {
 			klog.Warningf("Transport failed http2 configuration: %v", err)
 		}
 	}
