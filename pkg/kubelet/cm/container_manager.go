@@ -17,6 +17,7 @@ limitations under the License.
 package cm
 
 import (
+	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -140,6 +141,7 @@ type NodeConfig struct {
 type NodeAllocatableConfig struct {
 	KubeReservedCgroupName   string
 	SystemReservedCgroupName string
+	ReservedSystemCPUs       cpuset.CPUSet
 	EnforceNodeAllocatable   sets.String
 	KubeReserved             v1.ResourceList
 	SystemReserved           v1.ResourceList
