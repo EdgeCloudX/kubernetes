@@ -41,6 +41,7 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/component-base/featuregate"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
+
 	cadvisortest "k8s.io/kubernetes/pkg/kubelet/cadvisor/testing"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
 	"k8s.io/kubernetes/pkg/kubelet/config"
@@ -181,6 +182,7 @@ func newTestKubeletWithImageList(
 	kubelet.sourcesReady = config.NewSourcesReady(func(_ sets.String) bool { return true })
 	kubelet.masterServiceNamespace = metav1.NamespaceDefault
 	kubelet.serviceLister = testServiceLister{}
+	kubelet.nodeHasSynced = func() bool { return true }
 	kubelet.nodeInfo = testNodeInfo{
 		nodes: []*v1.Node{
 			{

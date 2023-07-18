@@ -44,6 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -269,7 +270,7 @@ type Dependencies struct {
 
 // makePodSourceConfig creates a config.PodConfig from the given
 // KubeletConfiguration or returns an error.
-func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, kubeDeps *Dependencies, nodeName types.NodeName, bootstrapCheckpointPath string) (*config.PodConfig, error) {
+func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, kubeDeps *Dependencies, nodeName types.NodeName, bootstrapCheckpointPath string, nodeHasSynced func() bool) (*config.PodConfig, error) {
 	manifestURLHeader := make(http.Header)
 	if len(kubeCfg.StaticPodURLHeader) > 0 {
 		for k, v := range kubeCfg.StaticPodURLHeader {
@@ -309,11 +310,11 @@ func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, ku
 	}
 
 	if kubeDeps.KubeClient != nil {
-		klog.Infof("Watching apiserver")
+		klog.Info("Adding apiserver pod source")
 		if updatechannel == nil {
 			updatechannel = cfg.Channel(kubetypes.ApiserverSource)
 		}
-		config.NewSourceApiserver(kubeDeps.KubeClient, nodeName, updatechannel)
+		config.NewSourceApiserver(kubeDeps.KubeClient, nodeName, nodeHasSynced, updatechannel)
 	}
 	return cfg, nil
 }
@@ -403,9 +404,33 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		klog.V(2).Infof("cloud provider determined current node name to be %s", nodeName)
 	}
 
+	var nodeHasSynced cache.InformerSynced
+	// var nodeLister corelisters.NodeLister
+	var nodeInfo *CachedNodeInfo
+
+	// If kubeClient == nil, we are running in standalone mode (i.e. no API servers)
+	// If not nil, we are running as part of a cluster and should sync w/API
+	if kubeDeps.KubeClient != nil {
+		kubeInformers := informers.NewSharedInformerFactoryWithOptions(kubeDeps.KubeClient, 0, informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+			options.FieldSelector = fields.Set{api.ObjectNameField: string(nodeName)}.String()
+		}))
+		nodeInfo = &CachedNodeInfo{NodeLister: kubeInformers.Core().V1().Nodes().Lister()}
+		nodeHasSynced = func() bool {
+			return kubeInformers.Core().V1().Nodes().Informer().HasSynced()
+		}
+		kubeInformers.Start(wait.NeverStop)
+		klog.Info("Attempting to sync node with API server")
+	} else {
+		// we don't have a client to sync!
+		nodeIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+		nodeInfo = &CachedNodeInfo{NodeLister: corelisters.NewNodeLister(nodeIndexer)}
+		nodeHasSynced = func() bool { return true }
+		klog.Info("Kubelet is running in standalone mode, will skip API server sync")
+	}
+
 	if kubeDeps.PodConfig == nil {
 		var err error
-		kubeDeps.PodConfig, err = makePodSourceConfig(kubeCfg, kubeDeps, nodeName, bootstrapCheckpointPath)
+		kubeDeps.PodConfig, err = makePodSourceConfig(kubeCfg, kubeDeps, nodeName, bootstrapCheckpointPath, nodeHasSynced)
 		if err != nil {
 			return nil, err
 		}
@@ -452,14 +477,14 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	}
 	serviceLister := corelisters.NewServiceLister(serviceIndexer)
 
-	nodeIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
-	if kubeDeps.KubeClient != nil {
-		fieldSelector := fields.Set{api.ObjectNameField: string(nodeName)}.AsSelector()
-		nodeLW := cache.NewListWatchFromClient(kubeDeps.KubeClient.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fieldSelector)
-		r := cache.NewReflector(nodeLW, &v1.Node{}, nodeIndexer, 0)
-		go r.Run(wait.NeverStop)
-	}
-	nodeInfo := &CachedNodeInfo{NodeLister: corelisters.NewNodeLister(nodeIndexer)}
+	// nodeIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	// if kubeDeps.KubeClient != nil {
+	// 	fieldSelector := fields.Set{api.ObjectNameField: string(nodeName)}.AsSelector()
+	// 	nodeLW := cache.NewListWatchFromClient(kubeDeps.KubeClient.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fieldSelector)
+	// 	r := cache.NewReflector(nodeLW, &v1.Node{}, nodeIndexer, 0)
+	// 	go r.Run(wait.NeverStop)
+	// }
+	// nodeInfo := &CachedNodeInfo{NodeLister: corelisters.NewNodeLister(nodeIndexer)}
 
 	// TODO: get the real node object of ourself,
 	// and use the real node name and UID.
@@ -508,6 +533,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		dnsConfigurer:                           dns.NewConfigurer(kubeDeps.Recorder, nodeRef, parsedNodeIP, clusterDNS, kubeCfg.ClusterDomain, kubeCfg.ResolverConfig),
 		serviceLister:                           serviceLister,
 		nodeInfo:                                nodeInfo,
+		nodeHasSynced:                           nodeHasSynced,
 		masterServiceNamespace:                  masterServiceNamespace,
 		streamingConnectionIdleTimeout:          kubeCfg.StreamingConnectionIdleTimeout.Duration,
 		recorder:                                kubeDeps.Recorder,
@@ -963,6 +989,10 @@ type Kubelet struct {
 	serviceLister serviceLister
 	// nodeInfo knows how to get information about the node for this kubelet.
 	nodeInfo predicates.NodeInfo
+
+	// nodeHasSynced indicates whether nodes have been sync'd at least once.
+	// Check this before trusting a response from the node lister.
+	nodeHasSynced cache.InformerSynced
 
 	// a list of node labels to register
 	nodeLabels map[string]string
