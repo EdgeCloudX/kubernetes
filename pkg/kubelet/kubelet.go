@@ -55,6 +55,9 @@ import (
 	cloudprovider "k8s.io/cloud-provider"
 	internalapi "k8s.io/cri-api/pkg/apis"
 	"k8s.io/klog"
+	utilexec "k8s.io/utils/exec"
+	"k8s.io/utils/integer"
+
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/features"
 	kubeletconfiginternal "k8s.io/kubernetes/pkg/kubelet/apis/config"
@@ -121,8 +124,6 @@ import (
 	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	"k8s.io/kubernetes/pkg/volume/util/subpath"
 	"k8s.io/kubernetes/pkg/volume/util/volumepathhandler"
-	utilexec "k8s.io/utils/exec"
-	"k8s.io/utils/integer"
 )
 
 const (
@@ -418,7 +419,10 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		nodeHasSynced = func() bool {
 			return kubeInformers.Core().V1().Nodes().Informer().HasSynced()
 		}
-		kubeInformers.Start(wait.NeverStop)
+		go func() {
+			time.Sleep(20 * time.Second)
+			kubeInformers.Start(wait.NeverStop)
+		}()
 		klog.Info("Attempting to sync node with API server")
 	} else {
 		// we don't have a client to sync!
@@ -473,7 +477,6 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	if kubeDeps.KubeClient != nil {
 		serviceLW := cache.NewListWatchFromClient(kubeDeps.KubeClient.CoreV1().RESTClient(), "services", metav1.NamespaceAll, fields.Everything())
 		r := cache.NewReflector(serviceLW, &v1.Service{}, serviceIndexer, 0)
-		time.Sleep(10 * time.Second)
 		go r.Run(wait.NeverStop)
 	}
 	serviceLister := corelisters.NewServiceLister(serviceIndexer)
