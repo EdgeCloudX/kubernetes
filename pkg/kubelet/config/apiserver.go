@@ -45,11 +45,11 @@ func NewSourceApiserver(c clientset.Interface, nodeName types.NodeName, nodeHasS
 	go func() {
 		for {
 			if nodeHasSynced() {
-				klog.V(4).Info("node sync completed")
+				klog.Info("node sync completed")
 				break
 			}
 			time.Sleep(WaitForAPIServerSyncPeriod)
-			klog.V(4).Info("node sync has not completed yet")
+			klog.Info("node sync has not completed yet")
 		}
 		klog.Info("Watching apiserver")
 		newSourceApiserverFromLW(lw, updates)

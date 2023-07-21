@@ -420,7 +420,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 			return kubeInformers.Core().V1().Nodes().Informer().HasSynced()
 		}
 		go func() {
-			time.Sleep(20 * time.Second)
+			time.Sleep(1 * time.Second)
 			kubeInformers.Start(wait.NeverStop)
 		}()
 		klog.Info("Attempting to sync node with API server")
