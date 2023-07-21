@@ -54,8 +54,6 @@ func NewSourceApiserver(c clientset.Interface, nodeName types.NodeName, nodeHasS
 		klog.Info("Watching apiserver")
 		newSourceApiserverFromLW(lw, updates)
 	}()
-
-	newSourceApiserverFromLW(lw, updates)
 }
 
 // newSourceApiserverFromLW holds creates a config source that watches and pulls from the apiserver.
