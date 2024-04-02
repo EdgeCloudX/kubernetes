@@ -173,7 +173,7 @@ func (p *staticPolicy) validateState(s state.State) error {
 		}
 		// state is empty initialize
 		allCPUs := p.topology.CPUDetails.CPUs()
-		s.SetDefaultCPUSet(allCPUs)
+		s.SetDefaultCPUSet(allCPUs.Difference(p.reserved))
 		return nil
 	}
 
@@ -181,10 +181,10 @@ func (p *staticPolicy) validateState(s state.State) error {
 	// 1. Check if the reserved cpuset is not part of default cpuset because:
 	// - kube/system reserved have changed (increased) - may lead to some containers not being able to start
 	// - user tampered with file
-	if !p.reserved.Intersection(tmpDefaultCPUset).Equals(p.reserved) {
-		return fmt.Errorf("not all reserved cpus: \"%s\" are present in defaultCpuSet: \"%s\"",
-			p.reserved.String(), tmpDefaultCPUset.String())
-	}
+	//if !p.reserved.Intersection(tmpDefaultCPUset).Equals(p.reserved) {
+	//	return fmt.Errorf("not all reserved cpus: \"%s\" are present in defaultCpuSet: \"%s\"",
+	//		p.reserved.String(), tmpDefaultCPUset.String())
+	//}
 
 	// 2. Check if state for static policy is consistent
 	for pod := range tmpAssignments {
@@ -211,7 +211,7 @@ func (p *staticPolicy) validateState(s state.State) error {
 			tmpCPUSets = append(tmpCPUSets, cset)
 		}
 	}
-	totalKnownCPUs = totalKnownCPUs.UnionAll(tmpCPUSets)
+	totalKnownCPUs = totalKnownCPUs.UnionAll(tmpCPUSets).Union(p.reserved)
 	if !totalKnownCPUs.Equals(p.topology.CPUDetails.CPUs()) {
 		return fmt.Errorf("current set of available CPUs \"%s\" doesn't match with CPUs in state \"%s\"",
 			p.topology.CPUDetails.CPUs().String(), totalKnownCPUs.String())
